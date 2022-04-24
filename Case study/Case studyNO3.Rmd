@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Case studies"
 output: html_document
 ---
 
