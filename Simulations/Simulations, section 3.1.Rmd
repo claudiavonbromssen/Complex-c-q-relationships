@@ -1,0 +1,253 @@
+---
+title: "Simulations, Section 3.2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Install and load necessary packages.
+```{r}
+library(tidyverse)
+library(broom)
+library(mgcv)
+```
+
+########################
+Simulations, section 3.1
+########################
+
+
+Figure: An example series (not shown in paper)
+
+```{r}
+set.seed(34)
+r<-rnorm(100, 0, sqrt(1))
+t<-seq(1:100)
+q<-rnorm(100, 0, sqrt(1))
+c=0+0.3*q+r
+c1<-c
+c1[1:100]<-c[1:100]+seq(1:100)/50
+datatest<-data.frame(q=q, c=c, t=t, c1=c1)
+
+datatest%>%
+  ggplot(aes(x=t, y=c1))+
+  geom_point()+
+  geom_line(aes(x=t, y=q), col="blue")+
+  ylab("")+
+  xlab("Time")+
+  theme_bw()+
+  theme(text= element_text(size = 20))
+```
+
+Simdata - Function to create generated data with the desired distributions and values for b
+variable c does not contain a trend, while c1 is the same series including a trend
+
+Simdata_q - Simulate data with a trend in discharge. 
+```{r}
+N=1000
+div=100
+
+
+set.seed(34)
+Simdata<-function(n=n, d=100, g=1, beta=0.3, div=10){
+	r<-rnorm(d, 0, sqrt(1))
+t<-seq(1:d)
+q<-rnorm(d, 0, sqrt(1))
+c<-0+beta*q+r
+c1<-c
+c1[g:d]<-c[g:d]+seq(1:((d-g)+1))/div
+sim<-rep(n, d)
+out<-data.frame(q,c, c1, t,sim)
+
+}
+
+
+Simdata_q<-function(n=n, d=100, g=1, beta=0.3, div=10){
+	r<-rnorm(d, 0, sqrt(1))
+t<-seq(1:d)
+q<-rnorm(d, 0, sqrt(1))
+c<-0+beta*q+r
+q1<-q
+q1[g:d]<-q[g:d]+seq(1:((d-g)+1))/div
+c2<-0+beta*q1+r
+sim<-rep(n, d)
+out<-data.frame(q,c, c2, q1, t,sim)
+
+}
+```
+
+Simulate data
+```{r}
+s1 <- data.frame(q=numeric(),c=numeric(), c1=numeric(), t=numeric(), sim=numeric()) 
+for (n in 1:N){
+  s<-Simdata(n)
+  s1<-full_join(s1,s)
+}
+```
+
+Run constant c-q slope models (LM_constant) for data without (c) and with (c1) trends in concentration
+```{r}
+s1%>%
+  group_by(as.factor(sim))%>%
+    nest() %>% 
+  mutate(model = map(data, ~lm(c ~ q, data = .x) %>% 
+                       tidy)) %>% 
+  unnest(model) %>%
+  filter(term == 'q')%>% rename(sim=`as.factor(sim)`, beta_lm_no_trend=estimate)%>%select(sim, beta_lm_no_trend) ->a1
+
+s1%>%
+group_by(as.factor(sim))%>%
+    nest() %>% 
+  mutate(model = map(data, ~lm(c1 ~ q, data = .x) %>% 
+                       tidy)) %>% 
+   unnest(model) %>%
+  filter(term == 'q')%>% rename(sim=`as.factor(sim)`, beta_lm_c_trend=estimate)%>%select(sim, beta_lm_c_trend) ->a2
+```
+
+
+Functions to run constant slope models including trend (GAM_constant) on data without trend (c) and with trend (c1), and using a discharge variable without trend (q) or one with trend (q1).
+```{r}
+run_mod_c1<-function(data=data){
+mm <- gamm(c1 ~  s(t, bs="ts")+q , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$p.coeff[2])
+}	
+
+run_mod_c<-function(data=data){
+mm <- gamm(c ~  s(t, bs="ts")+q , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$p.coeff[2])
+}	
+
+run_mod_q1<-function(data=data){
+mm <- gamm(c2 ~  s(t, bs="ts")+q1 , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$p.coeff[2])
+}	
+
+extract_trend<-function(q=q, c=c, t=t, data=data){
+mm <- gamm(c ~  s(t, bs="ts")+q , data=data,method="REML")  
+	return(predict(mm$gam, type="terms")[,2])
+}
+```
+
+Additional functions to extract edf from models
+```{r}
+run_mod_edf_c<-function(data=data){
+mm <- gamm(c ~  s(t, bs="ts")+q , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$edf)
+}	
+
+run_mod_edf_c1<-function(data=data){
+mm <- gamm(c1 ~  s(t, bs="ts")+q , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$edf)
+}	
+
+run_mod_edf_q1<-function(data=data){
+mm <- gamm(c2 ~  s(t, bs="ts")+q1 , data=data,method="REML")  
+	ss<-summary(mm$gam)
+	return(ss$edf)
+}
+```
+
+Run constant slope model with concentration trend (GAM_constant) on data without (c) and with (c1) trend in concentration.
+
+```{r}
+s1%>%
+  group_by(as.factor(sim))%>%
+  nest()%>%
+  mutate(model =map(data, ~run_mod_c(data=.x)))%>%
+  unnest(model)%>% rename(sim=`as.factor(sim)`, beta_gam_no_trend=model)%>%select(sim, beta_gam_no_trend)   ->a3
+
+s1%>%
+  group_by(as.factor(sim))%>%
+  nest()%>%
+  mutate(model =map(data, ~run_mod_c1(data=.x)))%>%
+  unnest(model)%>% rename(sim=`as.factor(sim)`, beta_gam_c_trend=model)%>%select(sim, beta_gam_c_trend) ->a4
+```
+
+Simulate data with trend in discharge
+```{r}
+set.seed(34)
+s2 <- data.frame(q=numeric(),c=numeric(), c1=numeric(), q1=numeric(), t=numeric(), sim=numeric()) 
+for (n in 1:N){
+  s<-Simdata_q(n)
+  s2<-full_join(s2,s)
+}
+```
+
+Run constant c-q slope models (LM_constant) for data with trends in discharge (q1) and corresponding concentration(c2) 
+```{r}
+s2%>%
+group_by(as.factor(sim))%>%
+    nest() %>% 
+  mutate(model = map(data, ~lm(c2 ~ q1, data = .x) %>% 
+                       tidy)) %>% 
+   unnest(model) %>%
+  filter(term == 'q1')%>% rename(sim=`as.factor(sim)`, beta_lm_q_trend=estimate)%>%select(sim, beta_lm_q_trend) ->a5
+```
+
+Run constant c-q model with trend (GAM_constant) for data with trend in discharge (q1) and corresponding concentration (c2)
+```{r}
+
+s2%>%
+  group_by(as.factor(sim))%>%
+  nest()%>%
+  mutate(model =map(data, ~run_mod_q1(data=.x)))%>%
+  unnest(model)%>% rename(sim=`as.factor(sim)`, beta_gam_q_trend=model)%>%select(sim, beta_gam_q_trend)   ->a6
+
+
+s2%>%
+  group_by(as.factor(sim))%>%
+  nest()%>%
+  mutate(model =map(data, ~extract_trend(c=c2, q=q1, t=t, data=.x)))%>%
+  unnest(model)  ->a7
+```
+
+#############################################################################################
+Figure 1: Boxplots of modelled c-q slopes for the six combination of models and scenarios
+#############################################################################################
+```{r}
+a1%>%left_join(a2, by="sim")%>%left_join(a3, by="sim")%>%left_join(a4,by="sim")%>%left_join(a5,by="sim")%>%left_join(a6,by="sim")->a_all
+
+a_all%>%
+  pivot_longer(cols=c("beta_lm_no_trend", "beta_lm_c_trend",  "beta_gam_no_trend", "beta_gam_c_trend", "beta_lm_q_trend", "beta_gam_q_trend"))%>%
+  mutate(groups=case_when(name=="beta_lm_no_trend"~"no trend present (Model 1)",
+                          name=="beta_lm_c_trend"~"c trend present (Model 1)",
+                          name=="beta_gam_no_trend"~"no trend present (Model 2)",
+                          name=="beta_gam_c_trend"~"c trend present (Model 2)",
+                           name=="beta_lm_q_trend"~"q trend present (Model 1)",
+                          name=="beta_gam_q_trend"~"q trend present (Model 2)"))->a_plot
+a_plot$groups<-factor(a_plot$groups, levels=c("no trend present (Model 1)", "no trend present (Model 2)", "c trend present (Model 1)", "c trend present (Model 2)", "q trend present (Model 1)",  "q trend present (Model 2)"))
+
+a_plot%>%mutate(trend=case_when(groups=="no trend present (Model 1)"~"No trend simulated (i)",
+                                groups=="no trend present (Model 2)"~"No trend simulated (i)",
+                                groups=="c trend present (Model 1)"~"Trend in concentration simulated (ii)", 
+                                groups=="c trend present (Model 2)"~"Trend in concentration simulated (ii)",
+                                groups=="q trend present (Model 1)"~"Trend in discharge simulated (iii)",
+                                groups=="q trend present (Model 2)"~"Trend in discharge simulated (iii)"),
+                model1=case_when(groups=="no trend present (Model 1)"~"LM",
+                                groups=="no trend present (Model 2)"~"GAM",
+                                groups=="c trend present (Model 1)"~"LM", 
+                                groups=="c trend present (Model 2)"~"GAM", 
+                                groups=="q trend present (Model 1)"~"LM",
+                                groups=="q trend present (Model 2)"~"GAM"
+                                ))%>%
+  mutate(model=fct_relevel(model1, levels=c("LM", "GAM")))%>%
+  ggplot(aes(y=value, x=model))+
+  geom_boxplot()+
+  scale_x_discrete(name = "",
+                  labels = c(expression("LM"["constant"]),
+                             expression("GAM"["constant"])))+
+  xlab("")+
+  ylab("Slope estimate b")+
+  theme_bw()+
+     theme(text= element_text(size = 20))+
+    facet_wrap(~trend)
+
+```
+

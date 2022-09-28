@@ -1,0 +1,262 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Function for needed to replace decimal commas
+```{r}
+replace_comma <- function(values){
+    values_parsed <- values %>% as.character() %>% parse_number(locale = locale(decimal_mark = ","))
+}
+```
+
+Load required packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(rkt)
+library(ggpubr)
+library(lubridate)
+library(mgcv)
+library(ggpubr)
+```
+
+
+###
+O14
+###
+
+Read concentration and discharge data from file, log-transform and create a date variable 
+```{r}
+mtransp<-read_excel("Analysvärden_220615.xls", sheet="Analysvärden", skip=2, guess_max=20000)%>%filter(ID=="O14", Provtyp=="Manuellt prov")%>%
+  mutate_at(c( "Totalkväve_mg/l", "Totalfosfor_mg/l"),replace_comma)%>%
+  mutate(logTN=log10(`Totalkväve_mg/l`), logTP=log10(`Totalfosfor_mg/l`),Year=as.numeric(substr(Datum, 1,4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%filter(Year<2021)
+
+disch<-read_excel("Vattenföring_O14_220615.xls", sheet="Vattenföring", skip=2, guess_max=100000)%>%filter(ID=="O14")%>%
+   mutate_at(c("Dygnsmedelflöde_l/s"),replace_comma)%>%
+  mutate(logq=log10(`Dygnsmedelflöde_l/s`), Year=as.numeric(substr(Datum, 1, 4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%filter(Year<2021)
+
+O14_test<-mtransp%>%left_join(disch)%>%mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"), dec.date=decimal_date(Date), dec.during=dec.date-year(Date))
+```
+
+#################################
+Compile information for Table S.1
+#################################
+
+
+Number of discharge with value 0, missing and compute mean discharge
+Compute Mann-Kendall test
+
+```{r}
+O14_test%>%filter((`Dygnsmedelflöde_l/s`==0 ))
+
+O14_test%>%filter((`Dygnsmedelflöde_l/s`!=0 ))->O14_a
+  
+O14_test%>%filter(is.na(`Dygnsmedelflöde_l/s`))
+
+O14_test%>%filter(!(is.na(`Dygnsmedelflöde_l/s`)| `Dygnsmedelflöde_l/s`==0))%>%summarise(meanf=mean(`Dygnsmedelflöde_l/s`))
+
+
+library(rkt)
+rkt(O14_a$Year, O14_a$logq, O14_a$Month, rep="m")
+```
+
+Plot for flow levels in O14
+
+```{r}
+flow_trendO14<-gamm(logq~s(Year, Month), data=O14_a)
+summary(flow_trendO14$gam)
+plot(flow_trendO14$gam)
+
+
+new<-expand.grid(Year=seq(min(O14_a$Year), max(O14_a$Year), length.out=50), Month=seq(1,12, length.out=50))
+
+predict_flow<-predict.gam(flow_trendO14$gam, type="response", newdata=new, se.fit=TRUE)
+#terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
+
+new$fit<-predict_flow$fit
+new$fit.upper<-new$fit+1.96*predict_flow$se.fit
+new$fit.lower<-new$fit-1.96*predict_flow$se.fit
+
+breaks <- c(-0.4, -0.3,  -0.2, -0.1, 0, 0.1,  0.2, 0.3, 0.4, 0.5, 0.6,0.7,  0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4,1.5,  1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4)
+
+new%>%
+ggplot(aes(x=Year, y=Month, z=fit)) +
+  stat_contour_filled(breaks=breaks)+
+  scale_fill_viridis_d(drop = FALSE)+
+ # geom_point(data=O14_a,aes(x=Year, y=Month),inherit.aes=FALSE)+
+  xlab("Year")+
+  xlim(1965,2021)+
+  theme_bw()+
+  scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
+  labs(fill = "Log-transformed discharge")+
+  theme(text= element_text(size = 16), legend.text=element_text(size=16))->O14_disch
+
+```
+
+###
+H29
+###
+
+Read concentration and discharge data from file, log-transform and create a date variable 
+
+```{r}
+mtransp<-read_excel("Analysvärden_220615.xls", sheet="Analysvärden", skip=2, guess_max=20000)%>%filter(ID=="H29", Provtyp=="Manuellt prov")%>%
+  mutate_at(c( "Totalkväve_mg/l", "Totalfosfor_mg/l"),replace_comma)%>%
+  mutate(logTN=log10(`Totalkväve_mg/l`), logTP=log10(`Totalfosfor_mg/l`),Year=as.numeric(substr(Datum, 1,4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%filter(Year<2021)
+
+disch<-read_excel("Vattenföring_H29_220615.xls", sheet="Vattenföring", skip=2, guess_max=100000)%>%filter(ID=="H29")%>%
+   mutate_at(c("Dygnsmedelflöde_l/s"),replace_comma)%>%
+  mutate(logq=log10(`Dygnsmedelflöde_l/s`), Year=as.numeric(substr(Datum, 1, 4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%filter(Year<2021)
+
+H29_test<-mtransp%>%left_join(disch)%>%mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"), dec.date=decimal_date(Date), dec.during=dec.date-year(Date))
+```
+
+#################################
+Compile information for Table S.1
+#################################
+
+
+Number of discharge with value 0, missing and compute mean discharge
+Compute Mann-Kendall test
+```{r}
+H29_test%>%filter((`Dygnsmedelflöde_l/s`==0 ))
+
+H29_test%>%filter((`Dygnsmedelflöde_l/s`!=0 ))->H29_a
+  
+H29_test%>%filter(is.na(`Dygnsmedelflöde_l/s`))
+
+H29_test%>%filter(!(is.na(`Dygnsmedelflöde_l/s`)| `Dygnsmedelflöde_l/s`==0))%>%summarise(meanf=mean(`Dygnsmedelflöde_l/s`))
+
+
+
+
+rkt(H29_a$Year, H29_a$logq, H29_a$Month, rep="m")
+```
+
+Plot for flow levels in H29
+```{r}
+flow_trendH29<-gamm(logq~s(Year, Month), data=H29_a)
+summary(flow_trendH29$gam)
+plot(flow_trendH29$gam)
+
+
+new<-expand.grid(Year=seq(min(H29_a$Year), max(O14_a$Year), length.out=50), Month=seq(1,12, length.out=50))
+
+predict_flow<-predict.gam(flow_trendH29$gam, type="response", newdata=new, se.fit=TRUE)
+#terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
+
+new$fit<-predict_flow$fit
+new$fit.upper<-new$fit+1.96*predict_flow$se.fit
+new$fit.lower<-new$fit-1.96*predict_flow$se.fit
+
+new%>%
+ggplot(aes(x=Year, y=Month, z=fit)) +
+  stat_contour_filled()+
+    scale_fill_viridis_d(drop = FALSE)+
+#  geom_point(data=H29_a, aes(x=Year, y=Month), inherit.aes = FALSE)+
+  xlab("Year")+
+  xlim(1965,2021)+
+  theme_bw()+
+  scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
+  labs(fill = "Log-transformed discharge")+
+  theme(text= element_text(size = 16), legend.text=element_text(size=16))->H29_disch
+
+```
+
+
+########
+Fyrisån
+########
+
+Read concentration and discharge data from file, log-transform and create a date variable 
+
+```{r}
+fyris1<-read_excel( "Fyris Flottsund 2020.xlsx")%>%
+  mutate(Year=Provtagningsår, Month=Provtagningsmånad, Day=Provtagningsdag)%>%filter(Year<2021)
+fyris2022<-read_excel( "Fyris Flottsund 2022.xlsx")%>%
+  mutate(Year=Provtagningsår, Month=Provtagningsmånad, Day=Provtagningsdag)%>%filter(Year<2021)
+fyrisQ<-read_excel( "Fyris Q 2020.xlsx")%>%
+    mutate(Year=year(Datum), Month=month(Datum), Day=day(Datum), Q=`Total stationskorrigerad vattenföring`)%>%dplyr::select(Year, Month, Day, Q)
+fyrisQ2021<-read_excel( "Fyris Q 2022.xlsx")%>%
+  mutate(Year=year(Datum), Month=month(Datum), Day=day(Datum), Q=`Total stationskorrigerad vattenföring`)%>%dplyr::select(Year, Month, Day, Q)%>%filter(Year==2021)
+
+fyrisQ70<-read_excel( "FyrisQ.xlsx")%>%
+  mutate(Year=ÅR, Month=MÅNAD, Day=DAG, Q=`Q_m3/s`)%>%
+  filter(ÅR<1981)%>%dplyr::select(-DAG, -MÅNAD, -ÅR)
+
+fyris1%>%full_join(fyris2022)->fyris1a
+
+fyrisQ70%>%full_join(fyrisQ)%>%full_join(fyrisQ2021)%>%right_join(fyris1a)%>%
+  mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"))%>%
+  arrange(Date)%>%filter(Year>1964)->Fyris2
+```
+
+
+#################################
+Compile information for Table S.1
+#################################
+
+
+Number of discharge with value 0, missing and compute mean discharge
+Compute Mann-Kendall test
+
+```{r}
+Fyris2%>%filter((Q==0 ))
+
+Fyris2%>%filter((Q!=0 ))%>% mutate(logq=log10(Q))->Fyris_a
+  
+Fyris2%>%filter(is.na(Q))
+
+Fyris2%>%filter(!(is.na(Q)| Q==0))%>%summarise(meanf=mean(Q))
+
+rkt(Fyris_a$Year, Fyris_a$logq, Fyris_a$Month, rep="m")
+```
+
+Plot for flow levels in Fyrisån
+```{r}
+flow_trendFyris<-gamm(logq~s(Year, Month), data=Fyris_a)
+summary(flow_trendFyris$gam)
+plot(flow_trendFyris$gam)
+
+
+new<-expand.grid(Year=seq(min(Fyris_a$Year), max(Fyris_a$Year), length.out=50), Month=seq(1,12, length.out=50))
+
+predict_flow<-predict.gam(flow_trendFyris$gam, type="response", newdata=new, se.fit=TRUE)
+#terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
+
+new$fit<-predict_flow$fit
+new$fit.upper<-new$fit+1.96*predict_flow$se.fit
+new$fit.lower<-new$fit-1.96*predict_flow$se.fit
+
+new%>%
+ggplot(aes(x=Year, y=Month, z=fit)) +
+  stat_contour_filled()+
+    scale_fill_viridis_d(drop = FALSE)+
+ # geom_point(data=Fyris_a,aes(x=Year, y=Month),inherit.aes=FALSE)+
+  xlab("Year")+
+  xlim(1965, 2021)+
+  theme_bw()+
+  scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
+  labs(fill = "Log-transformed discharge")+
+  theme(text= element_text(size = 16), legend.text=element_text(size=16))->Fyris_disch
+
+```
+
+
+##############################################################
+Figure S.1: Combined flow level plots for O14, H29 and Fyrisån
+##############################################################
+
+```{r}
+library(ggpubr)
+ggarrange(O14_disch, Fyris_disch, H29_disch, ncol=1, nrow=3, labels = c("O14", "Fyris", "H29"), hjust = c(-2,-1.5,-2), vjust = c(2,2,2), common.legend = TRUE, legend="right" )
+```
+
+
+

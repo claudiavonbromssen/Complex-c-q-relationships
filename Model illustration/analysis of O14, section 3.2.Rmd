@@ -1,0 +1,433 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Install and load necessary packages
+
+```{r}
+library(tidyverse)
+library(mgcv)
+library(lubridate)
+library(readxl)
+```
+
+To read data from files decimal commas need to be replaces with decimal points. The following function can be used for this.
+```{r}
+replace_comma <- function(values){
+    values_parsed <- values %>% as.character() %>% parse_number(locale = locale(decimal_mark = ","))
+}
+
+```
+
+
+Read concentration values for station O14, replace decimal commas, log-transform variables and create new variables that represent year, month and day.
+```{r}
+mtransp<-read_excel("Analysvärden_220615.xls", sheet="Analysvärden", skip=2, guess_max=20000)%>%filter(ID=="O14", Provtyp=="Manuellt prov")%>%
+  mutate_at(c( "Totalkväve_mg/l", "Totalfosfor_mg/l", "Nitrat+nitritkväve_mg/l"),replace_comma)%>%
+  mutate(logTN=log10(`Totalkväve_mg/l`), logTP=log10(`Totalfosfor_mg/l`),logNO3=log10(`Nitrat+nitritkväve_mg/l`), Year=as.numeric(substr(Datum, 1,4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%
+  filter(Year<2021)%>%
+  mutate(logNO3=case_when(`Nitrat+nitritkväve_mg/l`==0~log10(0.001),
+                          TRUE~logNO3))
+```
+
+Read discharge values for station O14, replace decimal commas, log-transform variables and create new variables that represent year, month and day.Remove days with a discharge equal to 0.
+```{r}
+disch<-read_excel("Vattenföring_O14_220615.xls", sheet="Vattenföring", skip=2, guess_max=100000)%>%filter(ID=="O14")%>%
+   mutate_at(c("Dygnsmedelflöde_l/s"),replace_comma)%>%
+  mutate(logq=log10(`Dygnsmedelflöde_l/s`), Year=as.numeric(substr(Datum, 1, 4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%
+  filter(!(`Dygnsmedelflöde_l/s`==0), Year<2021)
+```
+
+Combine concentration and discharge data sets, create a date variable, a variable giving date in decimal form and a variable giving time within the year. An additional vary small discharge value is set to missing.
+```{r}
+O14<-mtransp%>%left_join(disch)%>%mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"), dec.date=decimal_date(Date), dec.during=dec.date-year(Date))%>%drop_na(logNO3)
+
+
+#O14$logq[O14$Datum==as.Date("2018-10-01")]<-NA
+
+```
+
+##############################################################################
+Section 3.2: Estimating a constant c-q relationship in the presence of a trend
+##############################################################################
+
+modO14 is a model that estimates a constant c-q slope while a trend in log TN is also included (GAM_Constant)
+modO14_notrend is the same model without trend in concentration (LM_constant)
+
+```{r}
+#modO14<-gamm(logNO3~s(dec.date, bs="ts")+logq,correlation=corCAR1(form = ~dec.date),method="REML", data=O14)
+#summary(modO14$gam)
+
+modO14<-gamm(logNO3~s(dec.date, bs="ts")+logq,method="REML", data=O14)
+summary(modO14$gam)
+
+#modO14_notrend<-gls(logNO3~logq, correlation=corCAR1(form = ~dec.date),data=O14, na.action=na.omit)
+#summary(modO14_notrend)
+
+modO14_notrend<-lm(logNO3~logq, data=O14, na.action=na.omit)
+summary(modO14_notrend)
+
+
+O14$logq_cent<-O14$logq-mean(O14$logq, na.rm=TRUE)
+
+modO14_notrend<-lm(logNO3~logq_cent, data=O14, na.action=na.omit)
+summary(modO14_notrend)
+
+modO14<-gamm(logNO3~s(dec.date, bs="ts")+logq_cent,method="REML", data=O14)
+summary(modO14$gam)
+```
+####################################################################################
+Figure S.3: Plot of the trend in concentration, no relation to discharge is modelled
+####################################################################################
+
+```{r}
+modO14_trend_only<-gamm(logNO3~s(dec.date, bs="ts"),correlation=corCAR1(form = ~dec.date),method="REML", data=O14)
+terms<-predict.gam(modO14_trend_only$gam, type="terms", newdata=O14, se.fit=TRUE)
+
+O14$fit<-terms$fit[,1]+attr(terms, "constant")
+
+ggplot(O14, aes(dec.date, logNO3,fit)) +
+  geom_point(aes(x=dec.date, y=logNO3))+
+  geom_line(aes(y = fit), color="red", lwd=2)+
+  ylab("Nitrate (log-transformed)")+
+  xlab("Date")+
+  theme_bw()+
+  theme(text= element_text(size = 16))
+```
+
+
+###############################################
+Section 3.3: Estimating nonlinear relationships
+###############################################
+
+modO14_GAM_N: Following a GAM_Nonlinear model, a nonlinear c-q relationship as well as a trend in concentration levels.
+
+```{r}
+modO14_GAM_N<-gamm(logNO3~s(dec.date, bs="ts")+s(logq),correlation=corCAR1(form = ~dec.date),method="REML", data=O14)
+summary(modO14_GAM_N$gam)
+
+```
+
+Extract the fit and confidence band for the nonlinear relationship
+```{r}
+terms<-predict(modO14_GAM_N$gam, type="terms", newdata=O14, se.fit=TRUE)
+O14$sereg<-terms$se.fit[,2]
+O14$line<-terms$fit[,2]+mean(terms$fit[,1], na.rm=TRUE)+attr(terms, "constant")
+O14$Line_upper<-O14$line+2*terms$se.fit[,2]
+O14$Line_lower<-O14$line-2*terms$se.fit[,2]
+```
+
+##################################################
+Figure 2, left: Nonlinear c-q relationships in O14
+##################################################
+```{r}
+O14%>%
+  ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
+  geom_point()+
+  xlab("Discharge (log-transformed)")+
+  ylab("Nitrate (log-transformed)")+
+  geom_ribbon(aes(ymin=Line_lower, ymax=Line_upper), fill="lightgreen", alpha=0.5)+
+    geom_line(aes(x=logq, y=line), col="darkgreen",lwd=1)+
+  theme_bw()+
+  theme(text= element_text(size = 16))
+```
+
+Extract the nonlinear c-q slope estimate using derivatives
+```{r}
+library(gratia)
+ff<-derivatives(modO14_GAM_N)
+```
+
+###########################################
+Figure 2, right: Nonlinear c-q slope in O14
+###########################################
+```{r}
+ff%>%filter(var=="logq")%>%
+  ggplot(aes(data, derivative, lower, upper))+
+  geom_line(aes(y=derivative), col="red", lwd=2)+
+  geom_line(aes(y=lower))+
+  geom_line(aes(y=upper))+
+  ylab("c-q slope")+
+  xlab("Discharge (log-transformed)")+
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.09, fill="blue")+
+  theme_bw()+
+   theme(text= element_text(size = 16))
+
+   
+```
+
+Seasonailty in residuals?
+```{r}
+O14$cont_month=O14$dec.during*12+1
+O14%>%drop_na(logNO3, logq)->O14_a
+
+O14_a$resid<-residuals(modO14_GAM_N$gam)
+
+resid.points<-ggplot(O14_a, aes(x=Year,y=cont_month))+geom_point(aes(colour=resid), lwd=4)+scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred", midpoint = 0, space = "rgb", na.value = "grey50", guide = "colourbar", guide_legend(title="Residuals"))+
+  theme_classic()+
+    ylab("")+
+  xlab("")+
+  theme(panel.background = element_rect(fill = "gray56",
+                                colour = "gray56",
+                                size = 0.5, linetype = "solid"))
+resid.points
+
+dists <- as.matrix(dist(cbind(O14_a$Year, O14_a$cont_month)))
+
+dists.inv <- 1/dists
+diag(dists.inv) <- 0
+ 
+dists.inv[1:5, 1:5]
+ 
+library(ape)
+
+Moran.I(O14_a$resid, dists.inv)
+
+```
+
+
+
+
+
+Estimating nonlinear c-q relationships for different seasons
+
+Define seasons
+```{r}
+O14$seas<-1
+O14$seas[O14$Month==3| O14$Month==4 | O14$Month ==5]<-2
+O14$seas[O14$Month==6| O14$Month==7 | O14$Month ==8]<-3
+O14$seas[O14$Month==9| O14$Month==10 | O14$Month ==11]<-4
+O14$seas<-as.factor(O14$seas)
+```
+
+modO14_GAM_NS following a GAM_Nonlinear and seasonal model with nonlinear relationships for separate seasons
+```{r}
+modO14_GAM_NS<-gamm(logNO3~s(dec.date, bs="ts")+seas+s(logq, by=seas),correlation=corCAR1(form = ~dec.date),method="REML", data=O14)
+summary(modO14_GAM_NS$gam)
+```
+
+Extract fits and confidence bands for the seasonal c-q slopes models, March to May
+```{r}
+terms1<-predict(modO14_GAM_NS$gam, type="terms", newdata=O14, se.fit=TRUE)
+
+
+O14$sereg<-terms1$se.fit[,4]
+O14$line<-terms1$fit[,1]+terms1$fit[,4]+mean(terms1$fit[,2], na.rm=TRUE)+attr(terms1, "constant")
+O14$Line_upper<-O14$line+2*terms1$se.fit[,4]
+O14$Line_lower<-O14$line-2*terms1$se.fit[,4]
+```
+
+###########################################################
+Figure 3, upper row, left: Nonlinear relationship in spring
+###########################################################
+```{r}
+O14%>%
+  filter(seas==2)%>%
+  ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
+  geom_point()+
+  xlab("Discharge (log-transformed)")+
+  ylab("Nitrate (log-transformed)")+
+  geom_ribbon(aes(ymin=Line_lower, ymax=Line_upper), fill="lightgreen", alpha=0.5)+
+    geom_line(aes(x=logq, y=line), col="darkgreen",lwd=1)+
+  theme_bw()+
+  xlim(-1,3.2)+
+ theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Spring")
+```
+
+Extract fits and confidence bands for the seasonal c-q slopes models, June to August
+```{r}
+O14$sereg<-terms1$se.fit[,5]
+O14$line<-terms1$fit[,1]+terms1$fit[,5]+mean(terms1$fit[,2], na.rm=TRUE)+attr(terms1, "constant")
+O14$Line_upper<-O14$line+2*terms1$se.fit[,5]
+O14$Line_lower<-O14$line-2*terms1$se.fit[,5]
+```
+
+#############################################################
+Figure 3, upper row, middle: Nonlinear relationship in Summer
+#############################################################
+```{r}
+O14%>%
+  filter(seas==3)%>%
+  ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
+  geom_point()+
+  xlab("Discharge (log-transformed)")+
+  ylab("Nitrate (log-transformed)")+
+  geom_ribbon(aes(ymin=Line_lower, ymax=Line_upper), fill="lightgreen", alpha=0.5)+
+    geom_line(aes(x=logq, y=line), col="darkgreen",lwd=1)+
+  theme_bw()+
+   theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Summer")
+```
+
+Extract fits and confidence bands for the seasonal c-q slopes models, September to November
+```{r}
+
+O14$sereg<-terms1$se.fit[,6]
+O14$line<-terms1$fit[,1]+terms1$fit[,6]+mean(terms1$fit[,2], na.rm=TRUE)+attr(terms1, "constant")
+O14$Line_upper<-O14$line+2*terms1$se.fit[,6]
+O14$Line_lower<-O14$line-2*terms1$se.fit[,6]
+```
+
+############################################################
+Figure 3, upper row, right: Nonlinear relationship in autumn
+############################################################
+```{r}
+O14%>%
+  filter(seas==4)%>%
+  ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
+  geom_point()+
+  xlab("Discharge (log-transformed)")+
+  ylab("Nitrate (log-transformed)")+
+  geom_ribbon(aes(ymin=Line_lower, ymax=Line_upper), fill="lightgreen", alpha=0.5)+
+    geom_line(aes(x=logq, y=line), col="darkgreen",lwd=1)+
+  theme_bw()+
+   theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Autumn")
+```
+
+Extract fits and confidence bands for the seasonal c-q slopes models, December to February
+```{r}
+
+O14$sereg<-terms1$se.fit[,3]
+O14$line<-terms1$fit[,1]+terms1$fit[,3]+mean(terms1$fit[,2], na.rm=TRUE)+attr(terms1, "constant")
+O14$Line_upper<-O14$line+2*terms1$se.fit[,3]
+O14$Line_lower<-O14$line-2*terms1$se.fit[,3]
+```
+
+Not shown in article, Figure December to February
+```{r}
+O14%>%
+  filter(seas==1)%>%
+  ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
+  geom_point()+
+  xlab("Discharge (log-transformed)")+
+  ylab("Total nitrogen (log-transformed)")+
+  geom_ribbon(aes(ymin=Line_lower, ymax=Line_upper), fill="lightgreen", alpha=0.5)+
+    geom_line(aes(x=logq, y=line), col="darkgreen",lwd=1)+
+  theme_bw()+
+   theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Winter")
+
+```
+
+
+Extract c-q slopes from the seasonal model using derivatives 
+```{r}
+termsseas<-predict.gam(modO14_GAM_NS$gam, type="terms", newdata=O14, se.fit=TRUE)
+
+ff_seas<-derivatives(modO14_GAM_NS)
+```
+
+########################################################
+Figure 3, lower row, left: Nonlinear c-q slope in spring
+########################################################
+```{r}
+ff_seas%>%filter(var=="logq", smooth=="s(logq):seas2")%>%
+  ggplot(aes(data, derivative, lower, upper))+
+  geom_line(aes(y=derivative), col="red", lwd=2)+
+  geom_line(aes(y=lower))+
+  geom_line(aes(y=upper))+
+  ylab("c-q slope")+
+  xlab("Discharge (log-transformed)")+
+  ylim(-0.85, 4.5)+
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.09, fill="blue")+
+  theme_bw()+
+  theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Spring")
+```
+
+##########################################################
+Figure 3, lower row, middle: Nonlinear c-q slope in summer
+##########################################################
+```{r}
+ff_seas%>%filter(var=="logq", smooth=="s(logq):seas3")%>%
+  ggplot(aes(data, derivative, lower, upper))+
+  geom_line(aes(y=derivative), col="red", lwd=2)+
+  geom_line(aes(y=lower))+
+  geom_line(aes(y=upper))+
+  ylab("c-q slope")+
+  xlab("Discharge (log-transformed)")+
+    ylim(-0.85, 4.5)+
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.09, fill="blue")+
+  theme_bw()+
+  theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Summer")
+```
+
+#########################################################
+Figure 3, lower row, right: Nonlinear c-q slope in autumn
+#########################################################
+```{r}
+ff_seas%>%filter(var=="logq", smooth=="s(logq):seas4")%>%
+  ggplot(aes(data, derivative, lower, upper))+
+  geom_line(aes(y=derivative), col="red", lwd=2)+
+  geom_line(aes(y=lower))+
+  geom_line(aes(y=upper))+
+  ylab("c-q slope")+
+  xlab("Discharge (log-transformed)")+
+  ylim(-0.85, 4.5)+
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.09, fill="blue")+
+  theme_bw()+
+  theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Autumn")
+```
+
+Figure December to February (not shown in article)
+```{r}
+ff_seas%>%filter(var=="logq", smooth=="s(logq):seas1")%>%
+  ggplot(aes(data, derivative, lower, upper))+
+  geom_line(aes(y=derivative), col="red", lwd=2)+
+  geom_line(aes(y=lower))+
+  geom_line(aes(y=upper))+
+  ylab("c-q slope")+
+  xlab("Discharge (log-transformed)")+
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.09, fill="blue")+
+  theme_bw()+
+    theme(text= element_text(size = 16), plot.title = element_text(size=16))+
+  labs(title="Winter")
+
+
+```
+
+```{r}
+gam.check(modO14_GAM_NS$gam)
+gam.check(modO14_GAM_N$gam)
+```
+
+Figure S4: Comparison of observed and predicted values using a seasonal constant slope model and the GAM_nonlinear_and_seasonal model.
+```{r}
+modO14_GAM_NS_constant_cq<-gamm(logNO3~s(dec.date, bs="ts")+seas+logq,correlation=corCAR1(form = ~dec.date),method="REML", data=O14)
+
+O14_a<-O14%>%drop_na(logNO3, logq)
+
+O14_a$resid_const<-residuals(modO14_GAM_NS_constant_cq$gam)
+O14_a$resid_TS<-residuals(modO14_GAM_NS$gam)
+O14_a$pred_const<-as.numeric(predict(modO14_GAM_NS_constant_cq$gam , type="response"))
+O14_a$pred_NS<-as.numeric(predict(modO14_GAM_NS$gam, type="response"))
+
+
+O14_a%>%pivot_longer(cols=c(pred_NS, pred_const))->O14_b
+
+labels<- as_labeller(c(pred_const="GAM[constant]",pred_NS="GAM[nonlinear~and~seasonal]"),default=label_parsed)
+
+
+O14_b%>%
+  ggplot(aes(x=logNO3,y=value))+
+  geom_point(col="blue")+
+  geom_abline(slope=1, intercept=0, lwd=2)+
+  facet_wrap(~name, labeller=labels)+
+  ylab("Predicted values")+
+  xlab("Nitrate (log-transformed)")+
+  theme_classic()+
+   theme(strip.text.x = element_text(size = 16), text= element_text(size = 16))
+
+
+```
+
+
