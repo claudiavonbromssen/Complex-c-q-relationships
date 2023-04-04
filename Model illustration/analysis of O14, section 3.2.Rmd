@@ -91,7 +91,7 @@ terms<-predict.gam(modO14_trend_only$gam, type="terms", newdata=O14, se.fit=TRUE
 
 O14$fit<-terms$fit[,1]+attr(terms, "constant")
 
-ggplot(O14, aes(dec.date, logNO3,fit)) +
+FigureS3<-ggplot(O14, aes(dec.date, logNO3,fit)) +
   geom_point(aes(x=dec.date, y=logNO3))+
   geom_line(aes(y = fit), color="red", lwd=2)+
   ylab("Nitrate (log-transformed)")+
@@ -126,7 +126,7 @@ O14$Line_lower<-O14$line-2*terms$se.fit[,2]
 Figure 2, left: Nonlinear c-q relationships in O14
 ##################################################
 ```{r}
-O14%>%
+Figure2left<-O14%>%
   ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
   geom_point()+
   xlab("Discharge (log-transformed)")+
@@ -136,18 +136,24 @@ O14%>%
   theme_bw()+
   theme(text= element_text(size = 16))
 ```
+```{r}
+ggsave(filename = "Figure 2 left.jpg",    
+       plot = Figure2left,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
 
 Extract the nonlinear c-q slope estimate using derivatives
 ```{r}
 library(gratia)
-ff<-derivatives(modO14_GAM_N)
+derviatives_modO14_GAM_N<-derivatives(modO14_GAM_N)
 ```
 
 ###########################################
 Figure 2, right: Nonlinear c-q slope in O14
 ###########################################
 ```{r}
-ff%>%filter(var=="logq")%>%
+Figure2right<-derviatives_modO14_GAM_N%>%filter(var=="logq")%>%
   ggplot(aes(data, derivative, lower, upper))+
   geom_line(aes(y=derivative), col="red", lwd=2)+
   geom_line(aes(y=lower))+
@@ -161,7 +167,15 @@ ff%>%filter(var=="logq")%>%
    
 ```
 
-Seasonailty in residuals?
+```{r}
+ggsave(filename = "Figure 2 right.jpg",    
+       plot = Figure2right,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+
+Note: Seasonailty in residuals?
 ```{r}
 O14$cont_month=O14$dec.during*12+1
 O14%>%drop_na(logNO3, logq)->O14_a
@@ -226,7 +240,7 @@ O14$Line_lower<-O14$line-2*terms1$se.fit[,4]
 Figure 3, upper row, left: Nonlinear relationship in spring
 ###########################################################
 ```{r}
-O14%>%
+Figure3upperleft<-O14%>%
   filter(seas==2)%>%
   ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
   geom_point()+
@@ -240,6 +254,15 @@ O14%>%
   labs(title="Spring")
 ```
 
+```{r}
+ggsave(filename = "Figure 3 upper left.jpg",    
+       plot = Figure3upperleft,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
+```
+
+
+
 Extract fits and confidence bands for the seasonal c-q slopes models, June to August
 ```{r}
 O14$sereg<-terms1$se.fit[,5]
@@ -252,7 +275,7 @@ O14$Line_lower<-O14$line-2*terms1$se.fit[,5]
 Figure 3, upper row, middle: Nonlinear relationship in Summer
 #############################################################
 ```{r}
-O14%>%
+Figure3uppermiddle<-O14%>%
   filter(seas==3)%>%
   ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
   geom_point()+
@@ -263,6 +286,13 @@ O14%>%
   theme_bw()+
    theme(text= element_text(size = 16), plot.title = element_text(size=16))+
   labs(title="Summer")
+```
+
+```{r}
+ggsave(filename = "Figure 3 upper middle.jpg",    
+       plot = Figure3uppermiddle,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
 ```
 
 Extract fits and confidence bands for the seasonal c-q slopes models, September to November
@@ -278,7 +308,7 @@ O14$Line_lower<-O14$line-2*terms1$se.fit[,6]
 Figure 3, upper row, right: Nonlinear relationship in autumn
 ############################################################
 ```{r}
-O14%>%
+Figure3upperright<-O14%>%
   filter(seas==4)%>%
   ggplot(aes(x=logq, y=logNO3, Line_lower,Line_upper))+
   geom_point()+
@@ -291,6 +321,13 @@ O14%>%
   labs(title="Autumn")
 ```
 
+
+```{r}
+ggsave(filename = "Figure 3 upper right.jpg",    
+       plot = Figure3upperright,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
+```
 Extract fits and confidence bands for the seasonal c-q slopes models, December to February
 ```{r}
 
@@ -321,14 +358,14 @@ Extract c-q slopes from the seasonal model using derivatives
 ```{r}
 termsseas<-predict.gam(modO14_GAM_NS$gam, type="terms", newdata=O14, se.fit=TRUE)
 
-ff_seas<-derivatives(modO14_GAM_NS)
+derivatives_seas<-derivatives(modO14_GAM_NS)
 ```
 
 ########################################################
 Figure 3, lower row, left: Nonlinear c-q slope in spring
 ########################################################
 ```{r}
-ff_seas%>%filter(var=="logq", smooth=="s(logq):seas2")%>%
+Figure3lowerleft<-derivatives_seas%>%filter(var=="logq", smooth=="s(logq):seas2")%>%
   ggplot(aes(data, derivative, lower, upper))+
   geom_line(aes(y=derivative), col="red", lwd=2)+
   geom_line(aes(y=lower))+
@@ -342,11 +379,17 @@ ff_seas%>%filter(var=="logq", smooth=="s(logq):seas2")%>%
   labs(title="Spring")
 ```
 
+```{r}
+ggsave(filename = "Figure 3 lower left.jpg",    
+       plot = Figure3lowerleft,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
+```
 ##########################################################
 Figure 3, lower row, middle: Nonlinear c-q slope in summer
 ##########################################################
 ```{r}
-ff_seas%>%filter(var=="logq", smooth=="s(logq):seas3")%>%
+Figure3lowermiddle<-derivatives_seas%>%filter(var=="logq", smooth=="s(logq):seas3")%>%
   ggplot(aes(data, derivative, lower, upper))+
   geom_line(aes(y=derivative), col="red", lwd=2)+
   geom_line(aes(y=lower))+
@@ -360,11 +403,18 @@ ff_seas%>%filter(var=="logq", smooth=="s(logq):seas3")%>%
   labs(title="Summer")
 ```
 
+
+```{r}
+ggsave(filename = "Figure 3 lower middle.jpg",    
+       plot = Figure3lowermiddle,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
+```
 #########################################################
 Figure 3, lower row, right: Nonlinear c-q slope in autumn
 #########################################################
 ```{r}
-ff_seas%>%filter(var=="logq", smooth=="s(logq):seas4")%>%
+Figure3lowerright<-derivatives_seas%>%filter(var=="logq", smooth=="s(logq):seas4")%>%
   ggplot(aes(data, derivative, lower, upper))+
   geom_line(aes(y=derivative), col="red", lwd=2)+
   geom_line(aes(y=lower))+
@@ -376,6 +426,13 @@ ff_seas%>%filter(var=="logq", smooth=="s(logq):seas4")%>%
   theme_bw()+
   theme(text= element_text(size = 16), plot.title = element_text(size=16))+
   labs(title="Autumn")
+```
+
+```{r}
+ggsave(filename = "Figure 3 lower right.jpg",    
+       plot = Figure3lowerright,
+       #plot = last_plot(),
+       width = 4, height = 4, device = "jpg", dpi = 300 )
 ```
 
 Figure December to February (not shown in article)
@@ -394,6 +451,8 @@ ff_seas%>%filter(var=="logq", smooth=="s(logq):seas1")%>%
 
 
 ```
+
+
 
 ```{r}
 gam.check(modO14_GAM_NS$gam)
@@ -417,7 +476,7 @@ O14_a%>%pivot_longer(cols=c(pred_NS, pred_const))->O14_b
 labels<- as_labeller(c(pred_const="GAM[constant]",pred_NS="GAM[nonlinear~and~seasonal]"),default=label_parsed)
 
 
-O14_b%>%
+FigureS4top<-O14_b%>%
   ggplot(aes(x=logNO3,y=value))+
   geom_point(col="blue")+
   geom_abline(slope=1, intercept=0, lwd=2)+
@@ -430,4 +489,11 @@ O14_b%>%
 
 ```
 
+```{r}
+ggsave(filename = "Figure S4 top.jpg",    
+       plot = FigureS4top,
+       #plot = last_plot(),
+       width = 7, height = 5, device = "jpg", dpi = 300 )
+
+```
 
