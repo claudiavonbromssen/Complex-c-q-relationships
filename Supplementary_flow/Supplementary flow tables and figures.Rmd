@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Supplementary_flow"
 output: html_document
 ---
 
@@ -255,8 +255,16 @@ Figure S.1: Combined flow level plots for O14, H29 and Fyrisån
 
 ```{r}
 library(ggpubr)
-ggarrange(O14_disch, Fyris_disch, H29_disch, ncol=1, nrow=3, labels = c("O14", "Fyris", "H29"), hjust = c(-2,-1.5,-2), vjust = c(2,2,2), common.legend = TRUE, legend="right" )
+FigureS2<-ggarrange(O14_disch, Fyris_disch, H29_disch, ncol=1, nrow=3, labels = c("O14", "Fyris", "H29"), hjust = c(-2,-1.5,-2), vjust = c(2,2,2), common.legend = TRUE, legend="right" )+bgcolor("White")
 ```
 
+
+```{r}
+ggsave(filename = "Figure S2.jpg",    
+       plot = FigureS2,
+       #plot = last_plot(),
+       width = 10, height = 14, device = "jpg", dpi = 300 )
+
+```
 
 
