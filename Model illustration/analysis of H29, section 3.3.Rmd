@@ -24,9 +24,9 @@ replace_comma <- function(values){
 
 Read concentration data för H29, replace decimal comma with decimal point, log-transform total phosphorus, create variables year, month and day
 ```{r}
-mtransp<-read_excel("Jordbruk_analysvärden.xls", sheet="Analysvärden", skip=2, guess_max=20000)%>%filter(ID=="H29", Provtyp=="Manuellt prov")%>%
-  mutate_at(c( "Totalkväve_mg/l", "Totalfosfor_mg/l"),replace_comma)%>%
-  mutate(logTN=log10(`Totalkväve_mg/l`), logTP=log10(`Totalfosfor_mg/l`),Year=as.numeric(substr(Datum, 1,4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))
+mtransp<-read_excel("Analysvärden_220615.xls", sheet="Analysvärden", skip=2, guess_max=20000)%>%filter(ID=="H29", Provtyp=="Manuellt prov")%>%
+  mutate_at(c( "Totalkväve_mg/l", "Totalfosfor_mg/l", "Nitrat+nitritkväve_mg/l"),replace_comma)%>%
+  mutate(logNO3=log10(`Totalkväve_mg/l`), logTP=log10(`Totalfosfor_mg/l`), logNO3=log10(`Nitrat+nitritkväve_mg/l`), Year=as.numeric(substr(Datum, 1,4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%filter(Year<2021)
 ```
 
 Read discharge data, replace decimal comma with decimal point, create varialbe year, month and day, remove observations with a discharge of 0. 
@@ -34,12 +34,12 @@ Read discharge data, replace decimal comma with decimal point, create varialbe y
 disch<-read_excel("Vattenföring_H-län_210323.xls", sheet="Vattenföring", skip=2, guess_max=100000)%>%filter(ID=="H29")%>%
    mutate_at(c("Dygnsmedelflöde_l/s"),replace_comma)%>%
   mutate(logq=log10(`Dygnsmedelflöde_l/s`), Year=as.numeric(substr(Datum, 1, 4)), Month=as.numeric(substr(Datum, 6,7)), Day=as.numeric(substr(Datum, 9,10)))%>%
-  filter(!(`Dygnsmedelflöde_l/s`==0))
+  filter(!(`Dygnsmedelflöde_l/s`==0), Year<2021)
 ```
 
 Combine concentration and discharge data, create a decimal date variable and a variable indicating date within the year.
 ```{r}
-H29<-mtransp%>%left_join(disch)%>%mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"), dec.date=decimal_date(Date), dec.during=dec.date-year(Date))
+H29<-mtransp%>%left_join(disch)%>%mutate(Date=as.Date( paste(Month, Day , Year , sep = "." )  , format = "%m.%d.%Y"), dec.date=decimal_date(Date), dec.during=dec.date-year(Date))%>%drop_na(logNO3, logq)
 
 ```
 Table 3:
@@ -47,29 +47,24 @@ modH29_constant_withouttrend: model with constant c-q slope and without concentr
 modH29_constant_withtrend: model with constant c-q slope including a concentration trend (GAM_constant)
 
 ```{r}
-modH29_constant_withouttrend<-lm(logTN~logq, data=H29)
+modH29_constant_withouttrend<-lm(logNO3~logq, data=H29)
 summary(modH29_constant_withouttrend)
 
-modH29_constant_withtrend<-gamm(logTN~s(dec.date)+logq, correlation=corCAR1(form = ~dec.date),method="REML", data=H29)
+modH29_constant_withtrend<-gamm(logNO3~s(dec.date, bs="ts")+logq, method="REML", data=H29)
 summary(modH29_constant_withtrend$gam)
 ```
 
 
-Time-varying c-q slope model, changing over seasons (GAM_time-varying and seasonal)
+Time-varying c-q slope model, changing over seasons (GAM_timevarying and seasonal)
 
 ```{r}
-modH29_GAM_TS<-gamm(logTN~te(Year, dec.during, bs=c("cr", "cc")) +te(Year, dec.during, by=logq,  bs=c("cr", "cc")),correlation=corCAR1(form=~dec.date),data=H29, method="REML")
+H29$logq_cent=H29$logq-mean(H29$logq, na.rm=TRUE)
+modH29_GAM_TS<-gamm(logNO3~te(Year, dec.during, bs=c("ts", "cc")) +te(Year, dec.during, by=logq_cent,  bs=c("ts", "cc")),correlation=corCAR1(form=~dec.date),data=H29, method="REML")
 
-
-#Without autocorrelation term,in case the upper one does not run
-#modH29_GAM_TS<-gamm(logTP~te(Year, dec.during, bs=c("cr", "cc")) +te(Year, dec.during, by=logq,  bs=c("cr", "cc")),data=H29, method="REML")
-```
-
-Extract fitted values and c-q slope for the entire year
-```{r}
-terms29<-predict.gam(modH29_GAM_TS$gam, type="terms", newdata=H29, se.fit=TRUE)
+summary(modH29_GAM_TS$gam)
 
 ```
+
 
 #########################################################
 Figure 5, left: Plot of the year-season varying c-q slope
@@ -77,12 +72,12 @@ Figure 5, left: Plot of the year-season varying c-q slope
 
 Define a grid for plotting, years from start to end, season as decimal 0 to 1, logq equal to 1 to extract the slope parameter. Estimated coefficients on this grid and plot
 ```{r}
-new<-expand.grid(dec.during=seq(0,1, length.out=50), logq=rep(1, 50), Year=seq(min(H29$Year), max(H29$Year), length.out=50))
+new<-expand.grid(dec.during=seq(0,1, length.out=50), logq_cent=rep(1, 50), Year=seq(min(H29$Year), max(H29$Year), length.out=50))
 
 terms_new<-predict.gam(modH29_GAM_TS$gam, type="terms", newdata=new, se.fit=TRUE)
 #terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
 
-new$terms<-terms_new$fit[,1]+attr(terms29, "constant")
+new$terms<-terms_new$fit[,1]+attr(terms_new, "constant")
 new$coeff<-terms_new$fit[,2]
 
 new$cont_month=new$dec.during*12+1
@@ -90,48 +85,61 @@ new$Month=floor(new$cont_month)
 new$coeff.upper<-new$coeff+1.96*terms_new$se.fit[,2]
 new$coeff.lower<-new$coeff-1.96*terms_new$se.fit[,2]
 
-new%>%
+
+
+breaks <- c(0.15,0.3 ,0.45, 0.6, 0.75, 0.9, 1.05, 1.3, 1.45, 1.6)
+Figure5left<-new%>%
 ggplot(aes(x=Year, y=cont_month, z=coeff)) +
-  stat_contour_filled()+
+  stat_contour_filled(breaks=breaks)+
   xlab("Year")+
   theme_bw()+
   scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
   labs(fill = "c-q slope")+
-  theme(text= element_text(size = 14), legend.position="bottom", axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16))
+  theme(text= element_text(size = 12), legend.position="bottom", axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16))+
+  guides(fill=guide_legend(nrow=3))
 ```
+
+```{r}
+ggsave(filename = "Figure 5 left.jpg",    
+       plot = Figure5left,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+
 ##################
 Graphical abstract
 ##################
 
 
 ```{r}
-
+breaks <- c(0, 0.15,0.3 ,0.45, 0.6, 0.75, 0.9, 1.05, 1.3, 1.45, 1.6)
  new%>%
      ggplot(aes(x=Year, y=cont_month, z=coeff)) +
-     stat_contour_filled()+
+     stat_contour_filled(breaks=breaks)+
      xlab("Year")+
    theme_bw()+
      scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
      labs(fill = "")+
      theme(text= element_text(size = 26), legend.position="bottom", axis.title.x = element_text(size = 30), axis.title.y = element_text(size = 30))+
- labs(caption="Concentration-discharge slope for total nitrogen, catchment H29") +
+ labs(caption="Concentration-discharge slope for nitrate, catchment H29") +
   theme(plot.caption=element_text(size=30, hjust=0.5, margin=ggplot2::margin(15,0,0,0)))+
-   guides(fill=guide_legend(nrow=1))
+   guides(fill=guide_legend(nrow=2))
 
 
 
 ```
 
 ###########################################################
-Figure 5, right: Plot of two selected month for illustration
+Figure 6, right: Pot of two selected month for illustration
 ###########################################################
 
-Extract data in February and August using the continuous within-year variable cont_month. Plot the time-varying c-q slopes. 
+Sort out data in August using the continuous within year variable. Extract data in February and August
 
 ```{r}
 new$cont_month=new$dec.during*12+1
 
-new%>%filter(cont_month>8.4 & cont_month<8.6)%>%
+Figure5right<-new%>%filter(cont_month>8.4 & cont_month<8.6)%>%
   ggplot( aes(Year, coeff,coeff.lower,coeff.upper)) +
   geom_line(aes(y = coeff), color="red", lwd=2, linetype = "dashed")+
   geom_line(aes(y = coeff.lower))+
@@ -145,4 +153,147 @@ geom_line(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(y = coeff), col
   geom_ribbon(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(ymin=coeff.lower, ymax=coeff.upper),alpha=0.09, fill = "blue")+
   theme(text= element_text(size = 16))
 ```
+
+```{r}
+ggsave(filename = "Figure 5 right.jpg",    
+       plot = Figure5right,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+model with no temporal trend term estimated.
+```{r}
+# H29_a<-H29%>%drop_na(logNO3, logq)
+# H29_a$logq_cent=H29_a$logq-mean(H29_a$logq)
+# modH29_GAM_TS_utan_trend<-gamm(logNO3~te(Year, dec.during, by=logq_cent,  bs=c("ts", "cc")),correlation=corCAR1(form=~dec.date),data=H29_a, method="REML")
+# new<-expand.grid(dec.during=seq(0,1, length.out=50), logq_cent=rep(1, 50), Year=seq(min(H29$Year), max(H29$Year), length.out=50))
+# 
+# terms_new<-predict.gam(modH29_GAM_TS_utan_trend$gam, type="terms", newdata=new, se.fit=TRUE)
+# #terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
+# 
+# #new$terms<-terms_new$fit[,1]+attr(terms_new, "constant")
+# new$coeff<-terms_new$fit[,1]
+# 
+# new$cont_month=new$dec.during*12+1
+# new$Month=floor(new$cont_month)
+# new$coeff.upper<-new$coeff+1.96*terms_new$se.fit[,1]
+# new$coeff.lower<-new$coeff-1.96*terms_new$se.fit[,1]
+# 
+# 
+# 
+# breaks <- c(0.05,0.2 ,0.35, 0.5, 0.65, 0.8, 0.95, 1.1, 1.25, 1.4, 1.55, 1.7, 1.95)
+# new%>%
+# ggplot(aes(x=Year, y=cont_month, z=coeff)) +
+#   stat_contour_filled(breaks=breaks)+
+#   xlab("Year")+
+#   theme_bw()+
+#   scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
+#   labs(fill = "c-q slope")+
+#   theme(text= element_text(size = 14), legend.position="bottom", axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16))+
+#   guides(fill=guide_legend(nrow=3))
+# 
+# new$cont_month=new$dec.during*12+1
+# 
+# new%>%filter(cont_month>8.4 & cont_month<8.6)%>%
+#   ggplot( aes(Year, coeff,coeff.lower,coeff.upper)) +
+#   geom_line(aes(y = coeff), color="red", lwd=2, linetype = "dashed")+
+#   geom_line(aes(y = coeff.lower))+
+#   geom_line(aes(y = coeff.upper))+
+#   ylab("c-q slope")+
+#   geom_ribbon(aes(ymin=coeff.lower, ymax=coeff.upper),alpha=0.09, fill = "blue")+
+#   theme_bw()+
+# geom_line(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(y = coeff), color="blue", lwd=2)+
+#     geom_line(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(y = coeff.lower))+
+#   geom_line(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(y = coeff.upper))+
+#   geom_ribbon(data=new%>%filter(cont_month>2.4 & cont_month<2.6),aes(ymin=coeff.lower, ymax=coeff.upper),alpha=0.09, fill = "blue")+
+#   theme(text= element_text(size = 16))
+```
+
+################################################
+Figure S3: Plot trend estimate in modH29_GAM_TS:
+################################################
+```{r}
+new<-expand.grid(dec.during=seq(0,1, length.out=50), logq_cent=rep(1, 50), Year=seq(min(H29$Year), max(H29$Year), length.out=50))
+
+terms_new<-predict.gam(modH29_GAM_TS$gam, type="terms", newdata=new, se.fit=TRUE)
+#terms_new1<-predict.gam(N34_mod$gam, type="response", exclude=c("te(year)", "te(decimal_during)"), newdata=new, se.fit=TRUE)
+
+#new$terms<-terms_new$fit[,1]+attr(terms_new, "constant")
+new$trend<-terms_new$fit[,1]+attr(terms_new, "constant")
+
+new$cont_month=new$dec.during*12+1
+new$Month=floor(new$cont_month)
+new$trend.upper<-new$trend+1.96*terms_new$se.fit[,1]
+new$trend.lower<-new$trend-1.96*terms_new$se.fit[,1]
+new$coeff<-terms_new$fit[,2]
+
+new$coeff.upper<-new$coeff+1.96*terms_new$se.fit[,2]
+new$coeff.lower<-new$coeff-1.96*terms_new$se.fit[,2]
+
+
+
+breaks <- c(0.05,0.2 ,0.35, 0.5, 0.65, 0.8, 0.95, 1.1, 1.25, 1.4, 1.55, 1.7, 1.95)
+FigureS3<-new%>%
+ggplot(aes(x=Year, y=cont_month, z=trend)) +
+  stat_contour_filled()+
+  xlab("Year")+
+  theme_bw()+
+  scale_y_continuous(name="Month", breaks=c(1,3,5,7,9,11))+
+  labs(fill = "Estimated nitrate levels")+
+  theme(text= element_text(size = 14), legend.position="bottom", axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16))+
+  guides(fill=guide_legend(nrow=2))+
+  labs(fill="")+
+ #  labs(caption="Estimated NO3 levels")+
+ theme(plot.caption=element_text(size=16, hjust=0.5, margin=ggplot2::margin(15,0,0,0)))
+```
+
+```{r}
+ggsave(filename = "Figure S3.jpg",    
+       plot = FigureS3,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+#################################################################
+Figure S4: Prediction plot
+##################################################################
+```{r}
+modH29_GAM_TS_constant_cq<-gamm(logNO3~te(Year, dec.during, bs=c("ts", "cc")) +logq_cent,correlation=corCAR1(form=~dec.date),data=H29, method="REML")
+modH29_GAM_TS<-gamm(logNO3~te(Year, dec.during, bs=c("ts", "cc")) +te(Year, dec.during, by=logq_cent,  bs=c("ts", "cc")),correlation=corCAR1(form=~dec.date),data=H29, method="REML")
+
+
+H29$resid_const<-residuals(modH29_GAM_TS_constant_cq$gam)
+H29$resid_TS<-residuals(modH29_GAM_TS$gam)
+H29$pred_const<-as.numeric(predict(modH29_GAM_TS_constant_cq$gam , type="response"))
+H29$pred_TS<-as.numeric(predict(modH29_GAM_TS$gam, type="response"))
+
+
+H29%>%pivot_longer(cols=c(pred_TS, pred_const))->H29_b
+
+labels<- as_labeller(c(pred_const="GAM[constant]",pred_TS="GAM[timevarying~and~seasonal]"),default=label_parsed)
+
+
+FigureS4bottom<-H29_b%>%
+  ggplot(aes(x=logNO3,y=value))+
+  geom_point(col="blue")+
+  geom_abline(slope=1, intercept=0, lwd=2)+
+  facet_wrap(~name, labeller=labels)+
+  ylab("Predicted values")+
+  xlab("Nitrate (log-transformed)")+
+  theme_classic()+
+   theme(strip.text.x = element_text(size = 16),text= element_text(size = 16))
+
+
+
+```
+
+
+```{r}
+ggsave(filename = "Figure S4 bottom.jpg",    
+       plot = FigureS4bottom,
+       #plot = last_plot(),
+       width = 7, height = 5, device = "jpg", dpi = 300 )
+
+```
+
 
