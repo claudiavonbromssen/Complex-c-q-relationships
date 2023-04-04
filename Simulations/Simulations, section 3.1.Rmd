@@ -224,7 +224,7 @@ a_all%>%
                           name=="beta_gam_q_trend"~"q trend present (Model 2)"))->a_plot
 a_plot$groups<-factor(a_plot$groups, levels=c("no trend present (Model 1)", "no trend present (Model 2)", "c trend present (Model 1)", "c trend present (Model 2)", "q trend present (Model 1)",  "q trend present (Model 2)"))
 
-a_plot%>%mutate(trend=case_when(groups=="no trend present (Model 1)"~"No trend simulated (i)",
+Figure1<-a_plot%>%mutate(trend=case_when(groups=="no trend present (Model 1)"~"No trend simulated (i)",
                                 groups=="no trend present (Model 2)"~"No trend simulated (i)",
                                 groups=="c trend present (Model 1)"~"Trend in concentration simulated (ii)", 
                                 groups=="c trend present (Model 2)"~"Trend in concentration simulated (ii)",
@@ -249,5 +249,11 @@ a_plot%>%mutate(trend=case_when(groups=="no trend present (Model 1)"~"No trend s
      theme(text= element_text(size = 20))+
     facet_wrap(~trend)
 
+```
+```{r}
+ggsave(filename = "Figure1.jpg",    
+       plot = Figure1,
+       #plot = last_plot(),
+       width = 12, height = 6, device = "jpg", dpi = 300 )
 ```
 
