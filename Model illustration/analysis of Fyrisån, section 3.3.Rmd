@@ -86,7 +86,7 @@ Define a color palette and plot
 library(RColorBrewer)
 my_palette <- rev(brewer.pal(name="Blues",n=9)[5:9])
 
-Fyris%>%
+Figure4left<-Fyris%>%
   ggplot(aes(x=log_q, y=log_TP, col=decenn2))+
   geom_point()+
   geom_smooth(method="lm", se=FALSE,data=Fyris%>%filter(decenn2=="1965-1974"))+
@@ -106,6 +106,12 @@ Fyris%>%
 
 ```
 
+```{r}
+ggsave(filename = "Figure 4 left.jpg",    
+       plot = Figure4left,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
 
 ###################################################
 Figure 4, right: Time-varying c-q slopes in Fyrisån
@@ -139,7 +145,7 @@ concurvity(modFyris_GAM_T$gam)
 
 Plot c-q slopes.
 ```{r}
-ggplot(Fyris, aes(dec.date, coeff,coeff.lower,coeff.upper)) +
+Figure4right<-ggplot(Fyris, aes(dec.date, coeff,coeff.lower,coeff.upper)) +
   geom_line(aes(y = coeff), color="red", lwd=2)+
   geom_line(aes(y = coeff.lower))+
   geom_line(aes(y = coeff.upper))+
@@ -149,6 +155,14 @@ ggplot(Fyris, aes(dec.date, coeff,coeff.lower,coeff.upper)) +
   theme_bw()+
   theme(text= element_text(size = 16))
 ```
+```{r}
+ggsave(filename = "Figure 4 right.jpg",    
+       plot = Figure4right,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+
 Modelled trend (not shown)
 ```{r}
 
@@ -167,7 +181,7 @@ ggplot(Fyris, aes(dec.date, trend)) +
 
 
 
-Figure S2: Trend in TP in the Fyriså catchment
+Figure S1: Trend in TP in the Fyriså catchment
 
 ```{r}
 fyris_trend_only<-gamm(log_TP~s(dec.date, k=60),correlation=corCAR1(form = ~dec.date),method="REML", data=Fyris)
@@ -175,11 +189,59 @@ terms<-predict.gam(fyris_trend_only$gam, type="terms", newdata=Fyris, se.fit=TRU
 
 Fyris$fit_only_trend<-terms$fit[,1]+attr(terms, "constant")
 
-ggplot(Fyris, aes(dec.date, log_TP,fit_only_trend)) +
+FigureS1<-ggplot(Fyris, aes(dec.date, log_TP,fit_only_trend)) +
   geom_point(aes(x=dec.date, y=log_TP))+
   geom_line(aes(y = fit_only_trend), color="red", lwd=2)+
   ylab("Total phosphorus (log-transformed)")+
   xlab("Date")+
   theme_bw()+
   theme(text= element_text(size = 16))
+```
+
+
+```{r}
+ggsave(filename = "Figure S1.jpg",    
+       plot = FigureS1,
+       #plot = last_plot(),
+       width = 6, height = 6, device = "jpg", dpi = 300 )
+```
+
+#################################################################
+Figure S4: Prediction plot
+##################################################################
+```{r}
+modFyris_GAM_T_constant_cq<-gamm(log_TP~s(dec.date,bs="ts", k=40) +logq_cent,data=Fyris, correlation=corCAR1(form=~dec.date), method="REML")
+
+modFyris_GAM_T<-gamm(log_TP~s(dec.date,bs="ts", k=40) +s(dec.date,bs="ts", by=logq_cent),data=Fyris, correlation=corCAR1(form=~dec.date), method="REML")
+
+Fyris$resid_const<-residuals(modFyris_GAM_T_constant_cq$gam)
+Fyris$resid_T<-residuals(modFyris_GAM_T$gam)
+Fyris$pred_const<-as.numeric(predict(modFyris_GAM_T_constant_cq$gam , type="response"))
+Fyris$pred_T<-as.numeric(predict(modFyris_GAM_T$gam, type="response"))
+
+
+Fyris%>%pivot_longer(cols=c(pred_T, pred_const))->Fyris_b
+
+labels<- as_labeller(c(pred_const="GAM[constant]",pred_T="GAM[timevarying]"),default=label_parsed)
+
+
+FigureS4middle<-Fyris_b%>%
+  ggplot(aes(x=log_TP,y=value))+
+  geom_point(col="blue")+
+  geom_abline(slope=1, intercept=0, lwd=2)+
+  facet_wrap(~name, labeller=labels)+
+  ylab("Predicted values")+
+  xlab("Total phosphorus (log-transformed)")+
+  theme_classic()+
+   theme(strip.text.x = element_text(size = 16),text= element_text(size = 16))
+
+
+
+```
+
+```{r}
+ggsave(filename = "Figure S4 middle.jpg",    
+       plot = FigureS4middle,
+       #plot = last_plot(),
+       width = 7, height = 5, device = "jpg", dpi = 300 )
 ```
